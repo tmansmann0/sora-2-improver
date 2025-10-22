@@ -1,6 +1,7 @@
 import Head from 'next/head';
 import Link from 'next/link';
 import presets from '../presets.json';
+import { Container, Heading, Text, Box, Button } from '@chakra-ui/react';
 
 export default function Home() {
   const schema = {
@@ -16,21 +17,18 @@ export default function Home() {
         <meta name="description" content="Upload and improve your Sora 2 videos with our easy presets." />
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(schema) }} />
       </Head>
-      <header>
-        <h1>Sora 2 Improver</h1>
-      </header>
-      <main className="container">
+      <Container maxW="container.lg" py={8}>
+        <Heading as="h1" mb={4}>Sora 2 Improver</Heading>
         {presets.map((preset) => (
-          <div key={preset.slug} className="card">
-            <h2>{preset.title}</h2>
-            <p>{preset.description}</p>
-            <Link href={`/presets/${preset.slug}`}>Use {preset.title}</Link>
-          </div>
+          <Box key={preset.slug} p={4} mb={4} borderWidth="1px" borderRadius="lg" boxShadow="md">
+            <Heading as="h2" size="md">{preset.title}</Heading>
+            <Text mb={2}>{preset.description}</Text>
+            <Link href={`/upload?p=${preset.slug}`}>
+              <Button colorScheme="teal">Use {preset.title}</Button>
+            </Link>
+          </Box>
         ))}
-      </main>
-      <footer>
-        <p>&copy; {new Date().getFullYear()} Sora 2 Improver</p>
-      </footer>
+      </Container>
     </>
   );
 }
