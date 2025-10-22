@@ -1,0 +1,14 @@
+[
+  {
+    "slug": "video-upscaler",
+    "title": "Video Upscaler",
+    "description": "Upgrade your video resolution with FFmpeg.",
+    "ffmpegCommand": "-vf scale=3840:2160"
+  },
+  {
+    "slug": "video-deflickerer",
+    "title": "Video Deflickerer",
+    "description": "Remove flicker from your video with FFmpeg.",
+    "ffmpegCommand": "-vf deflicker"
+  }
+]
