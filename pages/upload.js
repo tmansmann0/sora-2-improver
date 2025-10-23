@@ -1,15 +1,32 @@
 import Head from 'next/head';
 import { useState } from 'react';
 import { useRouter } from 'next/router';
-import { Container, Heading, Text, Input, Button, FormControl, FormLabel, Alert, AlertIcon, Box } from '@chakra-ui/react';
+import {
+  Container,
+  Heading,
+  Text,
+  Input,
+  Button,
+  FormControl,
+  FormLabel,
+  Alert,
+  AlertIcon,
+  Box,
+  Progress,
+  VStack,
+} from '@chakra-ui/react';
 import presets from '../presets.json';
 
 export default function UploadPage() {
   const [file, setFile] = useState(null);
   const [error, setError] = useState(null);
   const [status, setStatus] = useState('idle');
+  const [statusMessage, setStatusMessage] = useState('');
+  const [resultUrl, setResultUrl] = useState(null);
+  const [errorDetails, setErrorDetails] = useState('');
   const router = useRouter();
-  const presetSlug = router.query.p;
+  const presetSlugRaw = router.query.p;
+  const presetSlug = Array.isArray(presetSlugRaw) ? presetSlugRaw[0] : presetSlugRaw;
   const preset = presets.find(p => p.slug === presetSlug);
   const maxFileSize = 50 * 1024 * 1024; // 50MB
 
@@ -20,38 +37,93 @@ export default function UploadPage() {
     "description": `Upload a file to process with ${preset ? preset.title : 'our service'}`,
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const resetTransientState = () => {
     setError(null);
-    if (!file) {
-      setError('Please select a file.');
+    setStatusMessage('');
+    setErrorDetails('');
+    setResultUrl(null);
+  };
+
+  const beginUpload = async selectedFile => {
+    if (status === 'uploading') {
       return;
     }
-    if (file.size > maxFileSize) {
+    resetTransientState();
+    if (!selectedFile) {
+      setError('Please select a file.');
+      setStatus('idle');
+      return;
+    }
+    if (selectedFile.size > maxFileSize) {
       setError('File exceeds 50MB.');
+      setStatus('idle');
+      return;
+    }
+    if (!presetSlug) {
+      setError('Missing preset information. Please return to the home page and choose a preset.');
+      setStatus('error');
+      return;
+    }
+    if (!preset) {
+      setError('The selected preset could not be found. Please try again from the presets list.');
+      setStatus('error');
       return;
     }
     setStatus('uploading');
+    setStatusMessage('Uploading file...');
     const form = new FormData();
-    form.append('file', file);
+    form.append('file', selectedFile);
     form.append('preset', presetSlug);
     try {
       const res = await fetch('/api/process', {
         method: 'POST',
         body: form,
       });
-      const data = await res.json();
+      let data = null;
+      let rawBody = '';
+      try {
+        rawBody = await res.text();
+        data = rawBody ? JSON.parse(rawBody) : null;
+      } catch (parseError) {
+        data = null;
+      }
       if (res.ok) {
-        setStatus('processing');
-        // Optionally handle data.resultUrl or other response
+        if (data?.resultUrl) {
+          setStatus('complete');
+          setStatusMessage('Processing complete! Your enhanced file is ready to download.');
+          setResultUrl(data.resultUrl);
+          setErrorDetails('');
+        } else {
+          setStatus('processing');
+          setStatusMessage('Processing started! We will provide a download link once it is ready.');
+          setErrorDetails('');
+        }
       } else {
+        const message = data?.error || 'Failed to upload file.';
+        const details =
+          typeof data?.details === 'string'
+            ? data.details
+            : data?.details
+            ? JSON.stringify(data.details, null, 2)
+            : rawBody || '';
         setStatus('error');
-        setError(data.error || 'Failed to upload file.');
+        setError(message);
+        const normalizedDetails = details || 'No additional details were returned by the server.';
+        setErrorDetails(`Server response details:\n${normalizedDetails}`);
+        setStatusMessage('');
       }
     } catch (err) {
       setStatus('error');
       setError('Failed to upload file.');
+      const errorMessage = err instanceof Error ? err.stack || err.message : String(err);
+      setErrorDetails(`Client error details:\n${errorMessage}`);
+      setStatusMessage('');
     }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    await beginUpload(file);
   };
 
   return (
@@ -63,32 +135,93 @@ export default function UploadPage() {
       </Head>
       <Container maxW="container.md" py={10}>
         <Heading mb={4}>Upload {preset ? `for ${preset.title}` : ''}</Heading>
+        {preset ? (
+          <Text mb={6} color="gray.600">
+            {preset.description}
+          </Text>
+        ) : (
+          <Alert status="warning" mb={6}>
+            <AlertIcon />
+            Choose a preset from the home page to enable uploads.
+          </Alert>
+        )}
         <Box p={6} borderWidth="1px" borderRadius="lg" boxShadow="md">
           <form onSubmit={handleSubmit}>
             <FormControl mb={4}>
               <FormLabel>Select file</FormLabel>
-              <Input type="file" onChange={e => setFile(e.target.files?.[0] ?? null)} />
+              <Input
+                type="file"
+                isDisabled={status === 'uploading'}
+                onChange={async e => {
+                  const selectedFile = e.target.files?.[0] ?? null;
+                  setFile(selectedFile);
+                  await beginUpload(selectedFile);
+                }}
+              />
+              <Text fontSize="sm" color="gray.500" mt={2}
+                aria-live="polite"
+              >
+                Choosing a file will immediately start the upload.
+              </Text>
             </FormControl>
-            {error && (
-              <Alert status="error" mb={4}>
-                <AlertIcon />
-                {error}
-              </Alert>
-            )}
-            {status === 'uploading' && (
-              <Alert status="info" mb={4}>
-                <AlertIcon />
-                Uploading file...
-              </Alert>
-            )}
-            {status === 'processing' && (
-              <Alert status="success" mb={4}>
-                <AlertIcon />
-                Processing started! Check back later for results.
-              </Alert>
-            )}
-            <Button colorScheme="teal" type="submit" isLoading={status === 'uploading'}>
-              Upload & Process
+            <VStack align="stretch" spacing={3} mb={4}>
+              {error && (
+                <Alert status="error" aria-live="assertive" alignItems="flex-start">
+                  <AlertIcon />
+                  <Box>
+                    <Text fontWeight="semibold">{error}</Text>
+                    {errorDetails && (
+                      <Box
+                        as="pre"
+                        mt={2}
+                        px={2}
+                        py={1}
+                        bg="blackAlpha.50"
+                        borderRadius="md"
+                        fontSize="sm"
+                        whiteSpace="pre-wrap"
+                        wordBreak="break-word"
+                      >
+                        {errorDetails}
+                      </Box>
+                    )}
+                  </Box>
+                </Alert>
+              )}
+              {statusMessage && status !== 'error' && (
+                <Alert
+                  status={status === 'complete' ? 'success' : 'info'}
+                  variant="left-accent"
+                  aria-live="polite"
+                >
+                  <AlertIcon />
+                  {statusMessage}
+                </Alert>
+              )}
+              {(status === 'uploading' || status === 'processing') && (
+                <Progress size="xs" isIndeterminate colorScheme="teal" borderRadius="md" />
+              )}
+              {resultUrl && (
+                <Button
+                  as="a"
+                  href={resultUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  colorScheme="teal"
+                  variant="outline"
+                >
+                  Download processed file
+                </Button>
+              )}
+            </VStack>
+            <Button
+              colorScheme="teal"
+              type="submit"
+              isLoading={status === 'uploading'}
+              loadingText="Uploading"
+              isDisabled={!preset || status === 'uploading' || status === 'processing'}
+            >
+              {status === 'error' ? 'Retry upload' : 'Upload & Process'}
             </Button>
           </form>
         </Box>
