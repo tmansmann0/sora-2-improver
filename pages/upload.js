@@ -23,6 +23,7 @@ export default function UploadPage() {
   const [status, setStatus] = useState('idle');
   const [statusMessage, setStatusMessage] = useState('');
   const [resultUrl, setResultUrl] = useState(null);
+  const [errorDetails, setErrorDetails] = useState('');
   const router = useRouter();
   const presetSlugRaw = router.query.p;
   const presetSlug = Array.isArray(presetSlugRaw) ? presetSlugRaw[0] : presetSlugRaw;
@@ -41,6 +42,7 @@ export default function UploadPage() {
     setError(null);
     setResultUrl(null);
     setStatusMessage('');
+    setErrorDetails('');
     if (!file) {
       setError('Please select a file.');
       setStatus('idle');
@@ -72,29 +74,41 @@ export default function UploadPage() {
         body: form,
       });
       let data = null;
+      let rawBody = '';
       try {
-        data = await res.json();
+        rawBody = await res.text();
+        data = rawBody ? JSON.parse(rawBody) : null;
       } catch (parseError) {
-        // Ignore JSON parse errors so we can still surface a generic message below
+        data = null;
       }
       if (res.ok) {
         if (data?.resultUrl) {
           setStatus('complete');
           setStatusMessage('Processing complete! Your enhanced file is ready to download.');
           setResultUrl(data.resultUrl);
+          setErrorDetails('');
         } else {
           setStatus('processing');
           setStatusMessage('Processing started! We will provide a download link once it is ready.');
+          setErrorDetails('');
         }
       } else {
         const message = data?.error || 'Failed to upload file.';
+        const details =
+          typeof data?.details === 'string'
+            ? data.details
+            : data?.details
+            ? JSON.stringify(data.details, null, 2)
+            : rawBody || '';
         setStatus('error');
         setError(message);
+        setErrorDetails(details);
         setStatusMessage('');
       }
     } catch (err) {
       setStatus('error');
       setError('Failed to upload file.');
+      setErrorDetails(err instanceof Error ? err.stack || err.message : String(err));
       setStatusMessage('');
     }
   };
@@ -130,14 +144,32 @@ export default function UploadPage() {
                   setStatus('idle');
                   setStatusMessage('');
                   setResultUrl(null);
+                  setErrorDetails('');
                 }}
               />
             </FormControl>
             <VStack align="stretch" spacing={3} mb={4}>
               {error && (
-                <Alert status="error" aria-live="assertive">
+                <Alert status="error" aria-live="assertive" alignItems="flex-start">
                   <AlertIcon />
-                  {error}
+                  <Box>
+                    <Text fontWeight="semibold">{error}</Text>
+                    {errorDetails && (
+                      <Box
+                        as="pre"
+                        mt={2}
+                        px={2}
+                        py={1}
+                        bg="blackAlpha.50"
+                        borderRadius="md"
+                        fontSize="sm"
+                        whiteSpace="pre-wrap"
+                        wordBreak="break-word"
+                      >
+                        {errorDetails}
+                      </Box>
+                    )}
+                  </Box>
                 </Alert>
               )}
               {statusMessage && status !== 'error' && (

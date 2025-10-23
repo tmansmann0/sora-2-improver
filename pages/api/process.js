@@ -16,7 +16,7 @@ export default async function handler(req, res) {
   const form = formidable({ maxFileSize: 50 * 1024 * 1024 });
   form.parse(req, async (err, fields, files) => {
     if (err) {
-      return res.status(500).json({ error: err.message });
+      return res.status(500).json({ error: err.message, details: err.stack });
     }
     const fileField = Array.isArray(files.file) ? files.file[0] : files.file;
     const presetField = Array.isArray(fields.preset) ? fields.preset[0] : fields.preset;
@@ -49,14 +49,17 @@ export default async function handler(req, res) {
           body: JSON.stringify({ file_name: fileName }),
         });
         const data = await resReg.json();
-        return { ok: resReg.ok && data.ok, data };
+        return { ok: resReg.ok && data.ok, data, status: resReg.status };
       }
 
       let registerRes = await register();
       if (!registerRes.ok) {
         registerRes = await register();
         if (!registerRes.ok) {
-          return res.status(500).json({ error: registerRes.data.error || 'Failed to register file' });
+          return res.status(500).json({
+            error: registerRes.data.error || 'Failed to register file',
+            details: registerRes.data,
+          });
         }
       }
       const uploadUrl = registerRes.data.upload.url;
@@ -72,13 +75,26 @@ export default async function handler(req, res) {
             'Content-Type': file.mimetype || 'application/octet-stream',
           },
         });
-        return resUpload;
+        const responseText = await resUpload.text().catch(() => null);
+        return {
+          ok: resUpload.ok,
+          status: resUpload.status,
+          statusText: resUpload.statusText,
+          body: responseText,
+        };
       }
       let uploadRes = await upload();
       if (!uploadRes.ok) {
         uploadRes = await upload();
         if (!uploadRes.ok) {
-          return res.status(500).json({ error: 'Failed to upload file' });
+          return res.status(500).json({
+            error: 'Failed to upload file',
+            details: {
+              status: uploadRes.status,
+              statusText: uploadRes.statusText,
+              body: uploadRes.body,
+            },
+          });
         }
       }
 
@@ -103,14 +119,17 @@ export default async function handler(req, res) {
           }),
         });
         const data = await resProc.json();
-        return { ok: resProc.ok && data.ok, data };
+        return { ok: resProc.ok && data.ok, data, status: resProc.status };
       }
 
       let proc = await processTask();
       if (!proc.ok) {
         proc = await processTask();
         if (!proc.ok) {
-          return res.status(500).json({ error: proc.data.error || 'Processing failed' });
+          return res.status(500).json({
+            error: proc.data.error || 'Processing failed',
+            details: proc.data,
+          });
         }
       }
 
@@ -118,7 +137,10 @@ export default async function handler(req, res) {
         proc.data.result && proc.data.result[0] ? proc.data.result[0].download_url : null;
       return res.status(200).json({ resultUrl });
     } catch (error) {
-      return res.status(500).json({ error: error.message || 'Unknown error' });
+      return res.status(500).json({
+        error: error.message || 'Unknown error',
+        details: error.stack || error,
+      });
     }
   });
 }
