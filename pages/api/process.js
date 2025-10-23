@@ -24,59 +24,90 @@ export default async function handler(req, res) {
     if (!preset) {
       return res.status(400).json({ error: 'Preset not found' });
     }
-
     try {
-      // Step 1: register file and get upload URL
       const fileName = file.originalFilename || file.newFilename || 'input.mp4';
-      const registerRes = await fetch('https://api.ffmpeg-api.com/file', {
-        method: 'POST',
-        headers: {
-          Authorization: process.env.FFMPEG_API_AUTHORIZATION,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ file_name: fileName }),
-      });
-      const registerData = await registerRes.json();
-      if (!registerData.ok) {
-        return res.status(500).json({ error: registerData.error || 'Failed to register file' });
-      }
-      const uploadUrl = registerData.upload.url;
-      const filePath = registerData.file.file_path;
 
-      // Step 2: upload the file to upload URL
-      const buffer = await fs.readFile(file.filepath);
-      await fetch(uploadUrl, {
-        method: 'PUT',
-        body: buffer,
-        headers: {
-          'Content-Type': file.mimetype || 'application/octet-stream',
-        },
-      });
-
-      // Step 3: process the file using preset command
-      const tokens = preset.ffmpegCommand.split(' ').filter(t => t && t !== '-i' && t !== 'input.mp4' && t !== 'output.mp4');
-      const outputFileName = 'output.mp4';
-      const processRes = await fetch('https://api.ffmpeg-api.com/ffmpeg/process', {
-        method: 'POST',
-        headers: {
-          Authorization: process.env.FFMPEG_API_AUTHORIZATION,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          task: {
-            inputs: [{ file_path: filePath }],
-            outputs: [{ file: outputFileName, options: tokens }],
+      // Step 1: register file with retry
+      async function register() {
+        const resReg = await fetch('https://api.ffmpeg-api.com/file', {
+          method: 'POST',
+          headers: {
+            Authorization: process.env.FFMPEG_API_AUTHORIZATION,
+            'Content-Type': 'application/json',
           },
-        }),
-      });
-      const processData = await processRes.json();
-      if (!processData.ok) {
-        return res.status(500).json({ error: processData.error || 'Processing failed' });
+          body: JSON.stringify({ file_name: fileName }),
+        });
+        const data = await resReg.json();
+        return { ok: resReg.ok && data.ok, data };
       }
-      const resultUrl = processData.result && processData.result[0] ? processData.result[0].download_url : null;
+
+      let registerRes = await register();
+      if (!registerRes.ok) {
+        registerRes = await register();
+        if (!registerRes.ok) {
+          return res.status(500).json({ error: registerRes.data.error || 'Failed to register file' });
+        }
+      }
+      const uploadUrl = registerRes.data.upload.url;
+      const filePath = registerRes.data.file.file_path;
+
+      // Step 2: upload file with retry
+      const buffer = await fs.readFile(file.filepath);
+      async function upload() {
+        const resUpload = await fetch(uploadUrl, {
+          method: 'PUT',
+          body: buffer,
+          headers: {
+            'Content-Type': file.mimetype || 'application/octet-stream',
+          },
+        });
+        return resUpload;
+      }
+      let uploadRes = await upload();
+      if (!uploadRes.ok) {
+        uploadRes = await upload();
+        if (!uploadRes.ok) {
+          return res.status(500).json({ error: 'Failed to upload file' });
+        }
+      }
+
+      // Step 3: process file with retry
+      const tokens = preset.ffmpegCommand
+        .split(' ')
+        .filter(t => t && t !== '-i' && t !== 'input.mp4' && t !== 'output.mp4');
+      const outputFileName = 'output.mp4';
+
+      async function processTask() {
+        const resProc = await fetch('https://api.ffmpeg-api.com/ffmpeg/process', {
+          method: 'POST',
+          headers: {
+            Authorization: process.env.FFMPEG_API_AUTHORIZATION,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            task: {
+              inputs: [{ file_path: filePath }],
+              outputs: [{ file: outputFileName, options: tokens }],
+            },
+          }),
+        });
+        const data = await resProc.json();
+        return { ok: resProc.ok && data.ok, data };
+      }
+
+      let proc = await processTask();
+      if (!proc.ok) {
+        proc = await processTask();
+        if (!proc.ok) {
+          return res.status(500).json({ error: proc.data.error || 'Processing failed' });
+        }
+      }
+
+      const resultUrl =
+        proc.data.result && proc.data.result[0] ? proc.data.result[0].download_url : null;
       return res.status(200).json({ resultUrl });
-    } catch (e) {
-      return res.status(500).json({ error: e.message || 'Unknown error' });
+    } catch (error) {
+      return res.status(500).json({ error: error.message || 'Unknown error' });
     }
   });
 }
