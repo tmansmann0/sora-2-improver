@@ -18,8 +18,19 @@ export default async function handler(req, res) {
     if (err) {
       return res.status(500).json({ error: err.message });
     }
-    const file = files.file;
-    const presetSlug = fields.preset;
+    const fileField = Array.isArray(files.file) ? files.file[0] : files.file;
+    const presetField = Array.isArray(fields.preset) ? fields.preset[0] : fields.preset;
+
+    if (!fileField) {
+      return res.status(400).json({ error: 'Uploaded file is required' });
+    }
+
+    if (!presetField) {
+      return res.status(400).json({ error: 'Preset is required' });
+    }
+
+    const file = fileField;
+    const presetSlug = presetField;
     const preset = presets.find(p => p.slug === presetSlug);
     if (!preset) {
       return res.status(400).json({ error: 'Preset not found' });
