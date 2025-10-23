@@ -37,18 +37,24 @@ export default function UploadPage() {
     "description": `Upload a file to process with ${preset ? preset.title : 'our service'}`,
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const resetTransientState = () => {
     setError(null);
-    setResultUrl(null);
     setStatusMessage('');
     setErrorDetails('');
-    if (!file) {
+    setResultUrl(null);
+  };
+
+  const beginUpload = async selectedFile => {
+    if (status === 'uploading') {
+      return;
+    }
+    resetTransientState();
+    if (!selectedFile) {
       setError('Please select a file.');
       setStatus('idle');
       return;
     }
-    if (file.size > maxFileSize) {
+    if (selectedFile.size > maxFileSize) {
       setError('File exceeds 50MB.');
       setStatus('idle');
       return;
@@ -66,7 +72,7 @@ export default function UploadPage() {
     setStatus('uploading');
     setStatusMessage('Uploading file...');
     const form = new FormData();
-    form.append('file', file);
+    form.append('file', selectedFile);
     form.append('preset', presetSlug);
     try {
       const res = await fetch('/api/process', {
@@ -102,15 +108,22 @@ export default function UploadPage() {
             : rawBody || '';
         setStatus('error');
         setError(message);
-        setErrorDetails(details);
+        const normalizedDetails = details || 'No additional details were returned by the server.';
+        setErrorDetails(`Server response details:\n${normalizedDetails}`);
         setStatusMessage('');
       }
     } catch (err) {
       setStatus('error');
       setError('Failed to upload file.');
-      setErrorDetails(err instanceof Error ? err.stack || err.message : String(err));
+      const errorMessage = err instanceof Error ? err.stack || err.message : String(err);
+      setErrorDetails(`Client error details:\n${errorMessage}`);
       setStatusMessage('');
     }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    await beginUpload(file);
   };
 
   return (
@@ -138,15 +151,18 @@ export default function UploadPage() {
               <FormLabel>Select file</FormLabel>
               <Input
                 type="file"
-                onChange={e => {
-                  setFile(e.target.files?.[0] ?? null);
-                  setError(null);
-                  setStatus('idle');
-                  setStatusMessage('');
-                  setResultUrl(null);
-                  setErrorDetails('');
+                isDisabled={status === 'uploading'}
+                onChange={async e => {
+                  const selectedFile = e.target.files?.[0] ?? null;
+                  setFile(selectedFile);
+                  await beginUpload(selectedFile);
                 }}
               />
+              <Text fontSize="sm" color="gray.500" mt={2}
+                aria-live="polite"
+              >
+                Choosing a file will immediately start the upload.
+              </Text>
             </FormControl>
             <VStack align="stretch" spacing={3} mb={4}>
               {error && (
@@ -205,7 +221,7 @@ export default function UploadPage() {
               loadingText="Uploading"
               isDisabled={!preset || status === 'uploading' || status === 'processing'}
             >
-              Upload & Process
+              {status === 'error' ? 'Retry upload' : 'Upload & Process'}
             </Button>
           </form>
         </Box>
